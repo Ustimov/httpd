@@ -1,4 +1,5 @@
-﻿open System.Net.Sockets
+﻿open System.IO
+open System.Net.Sockets
 
 let mutable ipAddress = "127.0.0.1"
 let mutable port = 80
@@ -26,23 +27,25 @@ let createResponse status =
 let processRequest (request: string) = 
     async {
         try
-            let methodPathProtocol = request.Split(' ')
+            let methodPathProtocol = request.Trim().Split(' ')   
+            if methodPathProtocol.Length <> 3 || methodPathProtocol.[0].Length = 0
+                || methodPathProtocol.[1].Length = 0 ||  methodPathProtocol.[2].Length = 0 then failwith "400 Bad request"
             methodPathProtocol.[1] <- System.Net.WebUtility.UrlDecode(methodPathProtocol.[1]).Split('?').[0]
             let path = 
                 match methodPathProtocol.[1] with
-                | _ when methodPathProtocol.[1].Contains("..") -> failwith "400 Bad request"
+                | _ when methodPathProtocol.[1].Contains("/../") -> failwith "400 Bad request"
                 | _ when methodPathProtocol.[1].EndsWith("/") -> 
-                    System.IO.Path.Combine(documentRoot, methodPathProtocol.[1].Substring(1), "index.html")
-                | _ -> System.IO.Path.Combine(documentRoot, methodPathProtocol.[1].Substring(1))
+                    Path.Combine(documentRoot, methodPathProtocol.[1].Substring(1), "index.html")
+                | _ -> Path.Combine(documentRoot, methodPathProtocol.[1].Substring(1))
             let mime = System.Web.MimeMapping.GetMimeMapping(path)
             let! responseContent = 
                 match methodPathProtocol.[0] with
-                | _ when System.IO.File.Exists(path) = false && path.EndsWith("index.html") -> failwith "403 Forbidden"
-                | _ when System.IO.File.Exists(path) = false -> failwith "404 Not found"
-                | "HEAD" -> async { return createContent ((new System.IO.FileInfo(path)).Length) mime ""B }
-                | "GET" -> async { use file = new System.IO.FileStream(path, System.IO.FileMode.Open)
-                                   let! content = file.AsyncRead(int ((new System.IO.FileInfo(path)).Length))               
-                                   return createContent ((new System.IO.FileInfo(path)).Length) mime content }
+                | _ when File.Exists(path) = false && path.EndsWith("index.html") -> failwith "403 Forbidden"
+                | _ when File.Exists(path) = false -> failwith "404 Not found"
+                | "HEAD" -> async { return createContent ((new FileInfo(path)).Length) mime ""B }
+                | "GET" -> async { use file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)
+                                   let! content = file.AsyncRead(int ((new FileInfo(path)).Length))               
+                                   return createContent ((new FileInfo(path)).Length) mime content }
                 | _ -> failwith "405 Method not allowed"
             let status = "200 OK"
             return [| createResponse status; responseContent |] |> Array.concat, status
@@ -66,7 +69,7 @@ let handler (connection: Socket) =
 let server =  
     let rec parse args =
         match args with
-        | h::t when h = "-r" && System.IO.Path.IsPathRooted(t.Head) -> documentRoot <- t.Head
+        | h::t when h = "-r" && Path.IsPathRooted(t.Head) -> documentRoot <- t.Head
         | h::t when h = "-p" -> port <- int t.Head
         | h::t when h = "-a" -> ipAddress <- t.Head
         | _ -> ()
